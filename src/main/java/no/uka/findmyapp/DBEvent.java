@@ -28,6 +28,7 @@ public class DBEvent
   private String thumbnailURL;
   private String imageURL;
   private int lowest_price;
+  private String place_string;
 
   public int getShowingId()
   {
@@ -306,4 +307,15 @@ public class DBEvent
   public void setLowest_price(int lowest_price) {
     this.lowest_price = lowest_price;
   }
+
+public String getPlace_string() {
+	if(place_string != null){
+		return place_string;
+	}
+	else return "";
+}
+
+public void setPlaceString(String placeString) {
+	this.place_string = placeString;
+}
 }

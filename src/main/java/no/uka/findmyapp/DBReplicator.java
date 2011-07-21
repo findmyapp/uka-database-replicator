@@ -23,6 +23,8 @@ public class DBReplicator {
 	private String masterDatabaseDBName;
 	private boolean debugmode; 
 	private boolean useACNProxy; 
+	private String showingJSONURL = "";
+	private String eventsJSONURL = "";
 	
 	private Connection connection1 = null;
 	private Connection connection2 = null;
@@ -58,6 +60,9 @@ public class DBReplicator {
 		masterPassword = configFile.getProperty("masterPassword");
 		masterDatabaseHost = configFile.getProperty("masterDatabaseHost"); 
 		masterDatabaseDBName = configFile.getProperty("masterDatabaseDBName");
+		
+		showingJSONURL = configFile.getProperty("showingJSONURL");
+		eventsJSONURL = configFile.getProperty("eventsJSONURL");
 		
 		if(configFile.getProperty("debugmode").equals("true") ){
 			debugmode = true;
@@ -239,22 +244,30 @@ public class DBReplicator {
 				event.setEvent_type(rs2.getString(19));
 				event.setAge_limit(rs2.getInt(20));
 				event.setSpotify_string(rs2.getString(21));
-			
+					
 				
 				/* JSON to Java using Google GSON
 				 * ref: http://stackoverflow.com/questions/1688099/converting-json-to-java/1688182#1688182
 				 */
-				String eventJSONcontent = fetcher.getWebFile("http://uka.no/program/json/event/"+event.getEvent_id());
-				String croppedEventJSONcontent = eventJSONcontent.substring(eventJSONcontent.indexOf("[")+1, eventJSONcontent.indexOf("]"));
-				
+				String eventJSONcontent = fetcher.getWebFile(eventsJSONURL+event.getEvent_id());
+				String croppedEventJSONcontent = "";
+				if(eventJSONcontent.length() > 5){
+					croppedEventJSONcontent = eventJSONcontent.substring(eventJSONcontent.indexOf("[")+1, eventJSONcontent.lastIndexOf("]"));
+				}
+				else return 302;
+					
 				JSONEvent eventDataArray = new Gson().fromJson(croppedEventJSONcontent, JSONEvent.class);
 				
 				if(debugmode){
 					System.out.println("eventDataArray:\n"+eventDataArray);
 				}
 				
-				String showingJSONcontent = fetcher.getWebFile("http://uka.no/program/json/showing/"+event.getShowingId());
-				String croppedShowingJSONcontent = showingJSONcontent.substring(showingJSONcontent.indexOf("[")+1, showingJSONcontent.indexOf("]"));
+				String showingJSONcontent = fetcher.getWebFile(showingJSONURL+event.getShowingId());
+				String croppedShowingJSONcontent = "";
+				if(showingJSONcontent.length() > 5){
+					croppedShowingJSONcontent = showingJSONcontent.substring(showingJSONcontent.indexOf("[")+1, showingJSONcontent.lastIndexOf("]"));
+				}
+				else return 302;
 				
 				JSONShowing showingDataArray = new Gson().fromJson(croppedShowingJSONcontent, JSONShowing.class);
 				
@@ -262,18 +275,21 @@ public class DBReplicator {
 					System.out.println("showingDataArray:\n"+showingDataArray);
 				}
 				
-				// TODO: Add additional fields from JSON feed
+				// Add additional fields based on JSON feed
 				event.setThumbnailURL("");
-				event.setImageURL("");
 				
 				if(showingDataArray != null){
 					event.setLowest_price(showingDataArray.getPrices_from());
+					event.setPlaceString(showingDataArray.getPlace_string());
+				}
+				if(eventDataArray != null){
+					event.setImageURL(eventDataArray.getImage_url());
 				}
 				
 				// Insert data from Event bean into slave database using UPDATE INTO				
 				if(connection1 != null){
 					try{
-						String SQL = "INSERT INTO findmydb.UKA_EVENTS VALUES ("+event.getShowingId()+", '"+event.getShowing_time()+"', '"+event.getPublish_time()+"', '"+event.getPlace()+"' , "+event.getBillig_id()+" ,' "+event.getBillig_name()+"', '"+event.getNetsale_from()+"','"+event.getNetsale_to()+"','"+event.getSale_from()+"','"+event.getSale_to()+"',"+event.isFree()+","+event.isAvailable_for_purchase()+","+event.isCanceled()+","+event.getEntrance_id()+","+event.getEvent_id()+",'"+event.getTitle()+"','"+event.getLead()+"','"+event.getText()+"','"+event.getEvent_type()+"','"+event.getImageURL()+"','"+event.getThumbnailURL()+"',"+event.getAge_limit()+",'"+event.getSpotify_string()+"','"+timestamp+"', "+event.getLowest_price()+") ON DUPLICATE KEY UPDATE showing_time='"+event.getShowing_time()+"',publish_time='"+event.getPublish_time()+"',place='"+event.getPlace()+"',billig_id="+event.getBillig_id()+", billig_name='"+event.getBillig_name()+"', netsale_from='"+event.getNetsale_from()+"', netsale_to='"+event.getNetsale_to()+"',sale_from='"+event.getSale_from()+"',sale_to='"+event.getSale_to()+"', free="+event.isFree()+", available_for_purchase="+event.isAvailable_for_purchase()+", canceled="+event.isCanceled()+", entrance_id="+event.getEntrance_id()+", event_id="+event.getEvent_id()+",title='"+event.getTitle()+"', lead='"+event.getLead()+"', text='"+event.getText()+"', event_type='"+event.getEvent_type()+"', image='"+event.getImageURL()+"',thumbnail='"+event.getThumbnailURL()+"', age_limit="+event.getAge_limit()+", spotify_string='"+event.getSpotify_string()+"', update_date='"+timestamp+"', lowest_price="+event.getLowest_price()+"" ;
+						String SQL = "INSERT INTO findmydb.UKA_EVENTS (id,showing_time,publish_time,place,billig_id,billig_name,netsale_from,netsale_to,sale_from,sale_to,free,available_for_purchase,canceled,entrance_id,event_id,title,lead,text,event_type,image,thumbnail,age_limit,spotify_string,update_date,lowest_price,place_string) VALUES ("+event.getShowingId()+", '"+event.getShowing_time()+"', '"+event.getPublish_time()+"', '"+event.getPlace()+"' , "+event.getBillig_id()+" ,' "+event.getBillig_name()+"', '"+event.getNetsale_from()+"','"+event.getNetsale_to()+"','"+event.getSale_from()+"','"+event.getSale_to()+"',"+event.isFree()+","+event.isAvailable_for_purchase()+","+event.isCanceled()+","+event.getEntrance_id()+","+event.getEvent_id()+",'"+event.getTitle()+"','"+event.getLead()+"','"+event.getText()+"','"+event.getEvent_type()+"','"+event.getImageURL()+"','"+event.getThumbnailURL()+"',"+event.getAge_limit()+",'"+event.getSpotify_string()+"','"+timestamp+"', "+event.getLowest_price()+",'"+event.getPlace_string()+"') ON DUPLICATE KEY UPDATE showing_time='"+event.getShowing_time()+"',publish_time='"+event.getPublish_time()+"',place='"+event.getPlace()+"',billig_id="+event.getBillig_id()+", billig_name='"+event.getBillig_name()+"', netsale_from='"+event.getNetsale_from()+"', netsale_to='"+event.getNetsale_to()+"',sale_from='"+event.getSale_from()+"',sale_to='"+event.getSale_to()+"', free="+event.isFree()+", available_for_purchase="+event.isAvailable_for_purchase()+", canceled="+event.isCanceled()+", entrance_id="+event.getEntrance_id()+", event_id="+event.getEvent_id()+",title='"+event.getTitle()+"', lead='"+event.getLead()+"', text='"+event.getText()+"', event_type='"+event.getEvent_type()+"', image='"+event.getImageURL()+"',thumbnail='"+event.getThumbnailURL()+"', age_limit="+event.getAge_limit()+", spotify_string='"+event.getSpotify_string()+"', update_date='"+timestamp+"', lowest_price="+event.getLowest_price()+", place_string='"+event.getPlace_string()+"'" ;
 						if(!debugmode){
 							Statement stmt = connection1.createStatement();
 							int result = stmt.executeUpdate(SQL);
@@ -416,6 +432,8 @@ class JSONEvent {
 	    private String detail_url;
 	    private int age_limit;
 	    private int id;
+	    private String image_url;
+	    private int[] recommended_events;
 	    
 	    public String getSpotify_query(){ return this.spotify_query; }
 	    public String getEvent_type(){ return this.event_type; }
@@ -424,6 +442,8 @@ class JSONEvent {
 	    public String getDetail_url(){ return this.detail_url; }
 	    public int getAge_limit(){ return this.age_limit; }
 	    public int getId(){ return this.id; }
+	    public String getImage_url() { return this.image_url; }
+	    public int[] getRecommended_events() { return this.recommended_events; }
 
 		public void setSpotify_query(String spotify_query) { this.spotify_query = spotify_query; }		
 		public void setEvent_type(String event_type) { this.event_type = event_type; }
@@ -432,6 +452,8 @@ class JSONEvent {
 		public void setDetail_url(String detail_url) { this.detail_url = detail_url; }
 		public void setAge_limit(int age_limit) { this.age_limit = age_limit; }
 		public void setId(int id) { this.id = id; }
+		public void setImage_url(String image_url) { this.image_url = image_url; }
+		public void setRecommended_events(int[] recommended_events){ this.recommended_events = recommended_events; }
 		
 		public String toString() {
 	        return String.format("spotify_query:%s,event_type:%s,lead:%s,title:%s,detail_url:%s,age_limit:%d,id:%d", this.spotify_query, this.event_type, this.lead, this.title,this.detail_url,this.age_limit,this.id);
@@ -454,6 +476,7 @@ class JSONShowing {
 		private int id;
 		private boolean free;
 		private String sale_from;
+		private String place_string;
 		
 		public boolean isCanceled() { return canceled; }
 		public String getPlace() { return place; }
@@ -465,6 +488,7 @@ class JSONShowing {
 		public int getId() { return id; }
 		public boolean isFree() { return free; }
 		public String getSale_from() { return sale_from; }
+		public String getPlace_string() { return place_string; }
 		
 		public void setCanceled(boolean canceled) { this.canceled = canceled; }
 		public void setPlace(String place) { this.place = place; }
@@ -476,6 +500,7 @@ class JSONShowing {
 		public void setId(int id) { this.id = id; }
 		public void setFree(boolean free) { this.free = free; }
 		public void setSale_from(String sale_from) { this.sale_from = sale_from; }
+		public void setPlace_string(String place_string) { this.place_string = place_string; }
 		
 		public String toString(){
 			return String.format("canceled:%s, place:%s, buy_url:%s,entrance_ticket:%s,showing_time:%s,event_id:%d,prices_from:%d,id:%d,free:%s,sales_from:%s", this.isCanceled(), this.place, this.buy_url, this.entrance_ticket, this.showing_time, this.event_id, this.prices_from, this.id, this.free, this.sale_from );
