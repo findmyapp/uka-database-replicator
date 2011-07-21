@@ -252,7 +252,7 @@ public class DBReplicator {
 				String eventJSONcontent = fetcher.getWebFile(eventsJSONURL+event.getEvent_id());
 				String croppedEventJSONcontent = "";
 				if(eventJSONcontent.length() > 5){
-					croppedEventJSONcontent = eventJSONcontent.substring(eventJSONcontent.indexOf("[")+1, eventJSONcontent.lastIndexOf("]"));
+					croppedEventJSONcontent = eventJSONcontent.substring(eventJSONcontent.indexOf("[")+1, eventJSONcontent.lastIndexOf("]")).trim();
 				}
 				else return 302;
 					
@@ -265,7 +265,7 @@ public class DBReplicator {
 				String showingJSONcontent = fetcher.getWebFile(showingJSONURL+event.getShowingId());
 				String croppedShowingJSONcontent = "";
 				if(showingJSONcontent.length() > 5){
-					croppedShowingJSONcontent = showingJSONcontent.substring(showingJSONcontent.indexOf("[")+1, showingJSONcontent.lastIndexOf("]"));
+					croppedShowingJSONcontent = showingJSONcontent.substring(showingJSONcontent.indexOf("[")+1, showingJSONcontent.lastIndexOf("]")).trim();
 				}
 				else return 302;
 				
@@ -273,9 +273,11 @@ public class DBReplicator {
 				
 				if(debugmode){
 					System.out.println("showingDataArray:\n"+showingDataArray);
+					System.out.println("eventDataArray:\n"+eventDataArray);
 				}
 				
 				// Add additional fields based on JSON feed
+				// Thumbnail is not provided in JSON feed at this time
 				event.setThumbnailURL("");
 				
 				if(showingDataArray != null){
@@ -373,6 +375,7 @@ public class DBReplicator {
 		
 		System.out.println(
 		 " \n\n Exit status codes:\n"+
+		 "-------------------------------------------\n"+
 		 "*   0 - Replication successfully executed\n"+
 		 "* 101 - Unable to establish connection to slave database\n"+
 		 "* 102 - Unable to load MySQL driver for slave database connection (InstantiationException)\n"+
@@ -456,7 +459,7 @@ class JSONEvent {
 		public void setRecommended_events(int[] recommended_events){ this.recommended_events = recommended_events; }
 		
 		public String toString() {
-	        return String.format("spotify_query:%s,event_type:%s,lead:%s,title:%s,detail_url:%s,age_limit:%d,id:%d", this.spotify_query, this.event_type, this.lead, this.title,this.detail_url,this.age_limit,this.id);
+	        return String.format("spotify_query:%s,event_type:%s,lead:%s,title:%s,detail_url:%s,age_limit:%d,id:%d, image_url:%s", this.spotify_query, this.event_type, this.lead, this.title,this.detail_url,this.age_limit,this.id, this.image_url);
 	    }
 }
 
