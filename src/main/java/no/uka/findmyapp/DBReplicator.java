@@ -45,10 +45,10 @@ public class DBReplicator {
 	 * Mandatory method to load properties from dbreplicator.properties file
 	 * @throws IOException
 	 */
-	private void loadProperties() throws IOException{
+	private void loadProperties(String configLocation) throws IOException{
 		
-		System.out.println("-> Loading properties");
-		configFile.load(this.getClass().getClassLoader().getResourceAsStream("dbreplicator.properties"));
+		System.out.println("-> Loading properties from " + configLocation);
+		configFile.load(this.getClass().getClassLoader().getResourceAsStream(configLocation));
 		
 		slaveUsername = configFile.getProperty("slaveUsername");
 		slavePassword = configFile.getProperty("slavePassword");
@@ -115,12 +115,12 @@ public class DBReplicator {
 	
 	/**
 	 * Method to trigger database replication from master database to slave database
-	 * @return
+	 * @return Exit code
 	 */
-	public int replicate(){
+	public int replicate(String configLocation){
 		
 		try{
-			this.loadProperties();
+			this.loadProperties(configLocation);
 		}
 		catch(IOException e){
 			System.out.println("Unable to read configuration file");
@@ -378,8 +378,26 @@ public class DBReplicator {
 		 "* 601 - Error while closing Result Sets or database connections - but replication should be OK\n\n"
 		);
 		
+		String configLocation = "";
+		
+		if(args.length > 0 && args != null){
+			if(args[0] instanceof String){
+				configLocation = (String) args[0];
+			}
+			else{
+				System.out.println("Usage:\n >java -jar dbreplicator <configFileName>");
+				System.out.println("NB! Config file must be in same path as jar file");
+				System.exit(0);				
+			}
+		}
+		else{
+			System.out.println("Usage:\n >java -jar dbreplicator <configFileLocation>");
+			System.out.println("NB! Config file must be in same path as jar file");
+			System.exit(0);
+		}
+		
 		DBReplicator dbr = new DBReplicator();
-		int status = dbr.replicate();
+		int status = dbr.replicate(configLocation);
 		System.out.println("\n\n----->Batch run completed<-----\n");
 		System.out.println("Exit status:  "+status);
 	}
