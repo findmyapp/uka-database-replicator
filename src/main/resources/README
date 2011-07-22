@@ -1,0 +1,25 @@
+# README for uka.dbreplicator
+
+To execute database replication, run:
+>java -jar dbreplicator.jar <config file>
+
+The config file requires the following parameters to be set:
+
+slaveUsername = <username for slave database (findmydb)>
+slavePassword = <password for user in slaveUsername>
+slaveDatabaseHost = <hostname or IP-address for slave database host>
+slaveDatabaseDBName = <name of database running on slaveDatabaseHost>
+
+masterUsername = <username for master database (UKA database)>
+masterPassword = <password for user in masterUsername>
+masterDatabaseHost = <hostname or IP-address for master database host>
+masterDatabseDBName = <name of database running on masterDatebaseHost>
+
+debugmode = <if true, the script prints SQL, but does not execute them (default FALSE)>
+useACNProxy = <determines if system proxy setting are to be set to match ACN webproxy or not (default FALSE)>
+
+showingJSONURL = <URL to the JSON feed of the UKA MDB2'showing'-table>
+eventJSONURL = <URL to the JSON feed of the UKA MDB2 'event'-table>
+
+NB! When using HTTPS in JSONURL-addresses, a CA certificate might be needed.
+This should be added to /etc/java-6-sun/security/cacerts using Java Keytool or equivalent
