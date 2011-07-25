@@ -373,6 +373,8 @@ public class DBReplicator {
 	 */
 	public static void main(String[] args){
 		
+		System.out.println("\n\n----->Batch run started at time "+ new java.util.Date(System.currentTimeMillis()  ) +" <-----\n");
+		
 		System.out.println(
 		 " \n\n Exit status codes:\n"+
 		 "-------------------------------------------\n"+
