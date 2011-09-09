@@ -6,13 +6,14 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
 import java.util.Properties;
 
 import com.google.gson.Gson;
 
 public class DBReplicator {
 	
-    private Properties configFile;	
+    private final Properties configFile;	
 	private String slaveUsername;
 	private String slavePassword;
 	private String slaveDatabaseHost;
@@ -29,7 +30,7 @@ public class DBReplicator {
 	private Connection connection1 = null;
 	private Connection connection2 = null;
 	private ResultSet rs2;
-	private java.sql.Timestamp timestamp;
+	private final java.sql.Timestamp timestamp;
 	
 	private DBEvent event;
 	private boolean doDelete;
@@ -66,13 +67,15 @@ public class DBReplicator {
 		
 		if(configFile.getProperty("debugmode").equals("true") ){
 			debugmode = true;
+		} else {
+			debugmode = false;
 		}
-		else debugmode = false;
 		
 		if(configFile.getProperty("useACNProxy").equals("true")){
 			useACNProxy = true;
+		} else {
+			useACNProxy = false;
 		}
-		else useACNProxy = false;
 	}
 	
 	/**
@@ -211,8 +214,7 @@ public class DBReplicator {
 			
 			// Workaround - need to fetch a webpage before fetching JSON feed from uka.no
 			// TODO: sort this out if possible
-			String temp = fetcher.getWebFile("http://www.uka.no");
-			temp = null;
+			fetcher.getWebFile("http://www.uka.no");
 			
 			int counter = 0;
 			
@@ -222,29 +224,32 @@ public class DBReplicator {
 				
 				System.out.print(++counter + ",");
 				
-				// This must match database view
-				event.setShowingId(rs2.getInt(1));
-				event.setShowing_time(rs2.getTimestamp(2));
-				event.setSale_from(rs2.getTimestamp(3)); 
-				event.setSale_to(rs2.getTimestamp(4));
-				event.setFree(rs2.getBoolean(5));
-				event.setEntrance_id(rs2.getInt(6));
-				event.setAvailable_for_purchase(rs2.getBoolean(7));
-				event.setNetsale_from(rs2.getTimestamp(8));
-				event.setNetsale_to(rs2.getTimestamp(9));
-				event.setPublish_time(rs2.getTimestamp(10));
-				event.setPlace(rs2.getString(11));
-				event.setCanceled(rs2.getBoolean(12));
-				event.setEvent_id(rs2.getInt(13));
-				event.setBillig_id(rs2.getInt(14));
-				event.setBillig_name(rs2.getString(15));
-				event.setTitle(rs2.getString(16));
-				event.setLead(rs2.getString(17));
-				event.setText(rs2.getString(18));
-				event.setEvent_type(rs2.getString(19));
-				event.setAge_limit(rs2.getInt(20));
-				event.setSpotify_string(rs2.getString(21));
-					
+				
+				boolean useDB = false;// Using JSON instead of DB
+				if(useDB) {
+					// This must match database view
+					event.setShowingId(rs2.getInt(1));
+					event.setShowing_time(rs2.getTimestamp(2));
+					event.setSale_from(rs2.getTimestamp(3)); 
+					event.setSale_to(rs2.getTimestamp(4));
+					event.setFree(rs2.getBoolean(5));
+					event.setEntrance_id(rs2.getInt(6));
+					event.setAvailable_for_purchase(rs2.getBoolean(7));
+					event.setNetsale_from(rs2.getTimestamp(8));
+					event.setNetsale_to(rs2.getTimestamp(9));
+					event.setPublish_time(rs2.getTimestamp(10));
+					event.setPlace(rs2.getString(11));
+					event.setCanceled(rs2.getBoolean(12));
+					event.setEvent_id(rs2.getInt(13));
+					event.setBillig_id(rs2.getInt(14));
+					event.setBillig_name(rs2.getString(15));
+					event.setTitle(rs2.getString(16));
+					event.setLead(rs2.getString(17));
+					event.setText(rs2.getString(18));
+					event.setEvent_type(rs2.getString(19));
+					event.setAge_limit(rs2.getInt(20));
+					event.setSpotify_string(rs2.getString(21));
+				}
 				
 				/* JSON to Java using Google GSON
 				 * ref: http://stackoverflow.com/questions/1688099/converting-json-to-java/1688182#1688182
@@ -253,8 +258,9 @@ public class DBReplicator {
 				String croppedEventJSONcontent = "";
 				if(eventJSONcontent.length() > 5){
 					croppedEventJSONcontent = eventJSONcontent.substring(eventJSONcontent.indexOf("[")+1, eventJSONcontent.lastIndexOf("]")).trim();
+				} else {
+					return 302;
 				}
-				else return 302;
 					
 				JSONEvent eventDataArray = new Gson().fromJson(croppedEventJSONcontent, JSONEvent.class);
 				
@@ -266,8 +272,9 @@ public class DBReplicator {
 				String croppedShowingJSONcontent = "";
 				if(showingJSONcontent.length() > 5){
 					croppedShowingJSONcontent = showingJSONcontent.substring(showingJSONcontent.indexOf("[")+1, showingJSONcontent.lastIndexOf("]")).trim();
+				} else {
+					return 302;
 				}
-				else return 302;
 				
 				JSONShowing showingDataArray = new Gson().fromJson(croppedShowingJSONcontent, JSONShowing.class);
 				
@@ -280,11 +287,37 @@ public class DBReplicator {
 				// Thumbnail is not provided in JSON feed at this time
 				event.setThumbnailURL("");
 				
-				if(showingDataArray != null){
+				if(showingDataArray != null) {
+					if(!useDB) {
+						event.setShowingId(showingDataArray.getId());
+						event.setShowing_time(Timestamp.valueOf(showingDataArray.getShowing_time()));
+						event.setSale_from(Timestamp.valueOf(showingDataArray.getSale_from())); 
+						//event.setSale_to(rs2.getTimestamp(4));
+						event.setFree(showingDataArray.isFree());
+						//event.setEntrance_id(rs2.getInt(6));
+						//event.setAvailable_for_purchase(rs2.getBoolean(7));
+						//event.setNetsale_from(rs2.getTimestamp(8));
+						//event.setNetsale_to(rs2.getTimestamp(9));
+						//event.setPublish_time(rs2.getTimestamp(10));
+						event.setPlace(showingDataArray.getPlace());
+						event.setCanceled(showingDataArray.isCanceled());
+						event.setEvent_id(showingDataArray.getEvent_id());
+						//event.setBillig_id(rs2.getInt(14));
+						//event.setBillig_name(rs2.getString(15));
+					}
 					event.setLowest_price(showingDataArray.getPrices_from());
 					event.setPlaceString(showingDataArray.getPlace_string());
 				}
 				if(eventDataArray != null){
+					
+					if(!useDB) {
+						event.setTitle(eventDataArray.getTitle());
+						event.setLead(eventDataArray.getLead());
+						event.setText("");	// TODO Use when available in JSON
+						event.setEvent_type(eventDataArray.getEvent_type());
+						event.setAge_limit(eventDataArray.getAge_limit());
+						event.setSpotify_string(eventDataArray.getSpotify_query());
+					}
 					event.setImageURL(eventDataArray.getImage_url());
 				}
 				
@@ -294,7 +327,7 @@ public class DBReplicator {
 						String SQL = "INSERT INTO findmydb.UKA_EVENTS (id,showing_time,publish_time,place,billig_id,billig_name,netsale_from,netsale_to,sale_from,sale_to,free,available_for_purchase,canceled,entrance_id,event_id,title,lead,text,event_type,image,thumbnail,age_limit,spotify_string,update_date,lowest_price,place_string) VALUES ("+event.getShowingId()+", '"+event.getShowing_time()+"', '"+event.getPublish_time()+"', '"+event.getPlace()+"' , "+event.getBillig_id()+" ,' "+event.getBillig_name()+"', '"+event.getNetsale_from()+"','"+event.getNetsale_to()+"','"+event.getSale_from()+"','"+event.getSale_to()+"',"+event.isFree()+","+event.isAvailable_for_purchase()+","+event.isCanceled()+","+event.getEntrance_id()+","+event.getEvent_id()+",'"+event.getTitle()+"','"+event.getLead()+"','"+event.getText()+"','"+event.getEvent_type()+"','"+event.getImageURL()+"','"+event.getThumbnailURL()+"',"+event.getAge_limit()+",'"+event.getSpotify_string()+"','"+timestamp+"', "+event.getLowest_price()+",'"+event.getPlace_string()+"') ON DUPLICATE KEY UPDATE showing_time='"+event.getShowing_time()+"',publish_time='"+event.getPublish_time()+"',place='"+event.getPlace()+"',billig_id="+event.getBillig_id()+", billig_name='"+event.getBillig_name()+"', netsale_from='"+event.getNetsale_from()+"', netsale_to='"+event.getNetsale_to()+"',sale_from='"+event.getSale_from()+"',sale_to='"+event.getSale_to()+"', free="+event.isFree()+", available_for_purchase="+event.isAvailable_for_purchase()+", canceled="+event.isCanceled()+", entrance_id="+event.getEntrance_id()+", event_id="+event.getEvent_id()+",title='"+event.getTitle()+"', lead='"+event.getLead()+"', text='"+event.getText()+"', event_type='"+event.getEvent_type()+"', image='"+event.getImageURL()+"',thumbnail='"+event.getThumbnailURL()+"', age_limit="+event.getAge_limit()+", spotify_string='"+event.getSpotify_string()+"', update_date='"+timestamp+"', lowest_price="+event.getLowest_price()+", place_string='"+event.getPlace_string()+"'" ;
 						if(!debugmode){
 							Statement stmt = connection1.createStatement();
-							int result = stmt.executeUpdate(SQL);
+							stmt.executeUpdate(SQL);
 						}
 						else{
 							System.out.println("-->SQL:\n"+SQL);
@@ -403,7 +436,7 @@ public class DBReplicator {
 		
 		if(args.length > 0 && args != null){
 			if(args[0] instanceof String){
-				configLocation = (String) args[0];
+				configLocation = args[0];
 			}
 			else{
 				System.out.println("Usage:\n >java -jar dbreplicator <configFileName>");
@@ -460,6 +493,7 @@ class JSONEvent {
 		public void setImage_url(String image_url) { this.image_url = image_url; }
 		public void setRecommended_events(int[] recommended_events){ this.recommended_events = recommended_events; }
 		
+		@Override
 		public String toString() {
 	        return String.format("spotify_query:%s,event_type:%s,lead:%s,title:%s,detail_url:%s,age_limit:%d,id:%d, image_url:%s", this.spotify_query, this.event_type, this.lead, this.title,this.detail_url,this.age_limit,this.id, this.image_url);
 	    }
@@ -507,6 +541,7 @@ class JSONShowing {
 		public void setSale_from(String sale_from) { this.sale_from = sale_from; }
 		public void setPlace_string(String place_string) { this.place_string = place_string; }
 		
+		@Override
 		public String toString(){
 			return String.format("canceled:%s, place:%s, buy_url:%s,entrance_ticket:%s,showing_time:%s,event_id:%d,prices_from:%d,id:%d,free:%s,sales_from:%s", this.isCanceled(), this.place, this.buy_url, this.entrance_ticket, this.showing_time, this.event_id, this.prices_from, this.id, this.free, this.sale_from );
 		}
