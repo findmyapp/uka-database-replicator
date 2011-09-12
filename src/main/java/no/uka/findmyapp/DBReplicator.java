@@ -1,17 +1,24 @@
 package no.uka.findmyapp;
 
+
+import java.io.File;
+import java.io.FileReader;
 import java.io.IOException;
+import java.net.MalformedURLException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Properties;
 
 import com.google.gson.Gson;
-
 public class DBReplicator {
+	
+	private final String JSON_OBJECT_SEPARATOR_REGEX = "(?<=[}]),\\s*";
 	
     private final Properties configFile;	
 	private String slaveUsername;
@@ -23,19 +30,21 @@ public class DBReplicator {
 	private String masterDatabaseHost; 
 	private String masterDatabaseDBName;
 	private boolean debugmode; 
-	private boolean useACNProxy; 
+	private boolean useProxy;
+	private String proxyHost = "";
+	private String proxyPort = "";
 	private String showingJSONURL = "";
 	private String eventsJSONURL = "";
 	
-	private Connection connection1 = null;
-	private Connection connection2 = null;
+	private Connection connectionMaster = null;
+	private Connection connectionSlave = null;
 	private ResultSet rs2;
 	private final java.sql.Timestamp timestamp;
 	
-	private DBEvent event;
-	private boolean doDelete;
+	private final boolean doDelete;
 	
 	private JSONFetcher fetcher;
+	boolean useDB = false;// Using JSON instead of DB
 	
 	// Public constructor
 	public DBReplicator(){
@@ -51,7 +60,15 @@ public class DBReplicator {
 	private void loadProperties(String configLocation) throws IOException{
 		
 		System.out.println("-> Loading properties from " + configLocation);
-		configFile.load(this.getClass().getClassLoader().getResourceAsStream(configLocation));
+		File file = new File(configLocation);
+		if(file.exists()) {
+			System.out.println("Config file exists!!!");
+		} else {
+			System.out.println("No config file exists!!!");
+		}
+		//configFile.load(this.getClass().getClassLoader().getResourceAsStream(configLocation));
+		
+		configFile.load(new FileReader(file));
 		
 		slaveUsername = configFile.getProperty("slaveUsername");
 		slavePassword = configFile.getProperty("slavePassword");
@@ -71,11 +88,27 @@ public class DBReplicator {
 			debugmode = false;
 		}
 		
-		if(configFile.getProperty("useACNProxy").equals("true")){
-			useACNProxy = true;
+		if(configFile.getProperty("useProxy").equals("true")){
+			useProxy = true;
 		} else {
-			useACNProxy = false;
+			useProxy = false;
 		}
+		proxyHost = configFile.getProperty("proxyHost"); 
+		proxyPort = configFile.getProperty("proxyport");
+	}
+	/**
+	 * Method to connect to master database using PostgreSQL 
+	 * @throws ClassNotFoundException 
+	 * @throws IllegalAccessException 
+	 * @throws InstantiationException 
+	 * @throws SQLException 
+	 */
+	private void connectToMasterDataSource() throws InstantiationException, IllegalAccessException, ClassNotFoundException, SQLException{
+	
+
+		Class.forName("org.postgresql.Driver").newInstance();
+		connectionMaster = DriverManager.getConnection("jdbc:postgresql://"+masterDatabaseHost+"/"+masterDatabaseDBName,masterUsername, masterPassword );
+
 	}
 	
 	/**
@@ -89,22 +122,7 @@ public class DBReplicator {
 	
 
 			Class.forName ("com.mysql.jdbc.Driver").newInstance ();
-			connection1 = DriverManager.getConnection("jdbc:mysql://"+slaveDatabaseHost+"/"+slaveDatabaseDBName, slaveUsername, slavePassword);
-
-	}
-	
-	/**
-	 * Method to connect to master database using PostgreSQL 
-	 * @throws ClassNotFoundException 
-	 * @throws IllegalAccessException 
-	 * @throws InstantiationException 
-	 * @throws SQLException 
-	 */
-	private void connectToMasterDataSource() throws InstantiationException, IllegalAccessException, ClassNotFoundException, SQLException{
-	
-
-		Class.forName("org.postgresql.Driver").newInstance();
-		connection2 = DriverManager.getConnection("jdbc:postgresql://"+masterDatabaseHost+"/"+masterDatabaseDBName,masterUsername, masterPassword );
+			connectionSlave = DriverManager.getConnection("jdbc:mysql://"+slaveDatabaseHost+"/"+slaveDatabaseDBName, slaveUsername, slavePassword);
 
 	}
 	
@@ -115,10 +133,294 @@ public class DBReplicator {
 	private void cleanUp() throws SQLException{
 		
 		System.out.println("-> Cleaning up connections and result sets");
-		rs2.close();
+		
+		if(rs2 != null) {
+			rs2.close();
+		}
+		
+		if(connectionMaster != null) {
+			connectionMaster.close();
+		}
+		if(connectionSlave != null) {
+			connectionSlave.close();
+		}
+	}
+	
+	/**
+	 * Get array of all events from DB.
+	 * 
+	 * @param resultSet
+	 * @return
+	 * @throws InstantiationException
+	 * @throws IllegalAccessException
+	 * @throws ClassNotFoundException
+	 * @throws SQLException
+	 * @throws IOException 
+	 * @throws IllegalArgumentException 
+	 * @throws MalformedURLException 
+	 */
+	private DBEvent[] populateEventsFromDb(Connection connection) throws InstantiationException, IllegalAccessException, ClassNotFoundException, SQLException, MalformedURLException, IllegalArgumentException, IOException {
+		if(connection == null) {
+			return null;
+		}
+		System.out.println("-> Retrieving data from master database");
+    	Statement stmt = connection.createStatement();
+    	ResultSet resultSet = stmt.executeQuery("SELECT * FROM uka.events_showing_event_published");
+    	if(resultSet == null) {
+    		return null;
+    	}
+		List<DBEvent> eventList = new ArrayList<DBEvent>();
+		int counter = 0;
+		System.out.println("Retrieving rows from DB:");
+		while(resultSet.next()) {
+			System.out.print(++counter + ",");
+			DBEvent event = new DBEvent();
+			// This must match database view
+			event.setShowingId(resultSet.getInt(1));
+			event.setShowing_time(resultSet.getTimestamp(2));
+			event.setSale_from(resultSet.getTimestamp(3)); 
+			event.setSale_to(resultSet.getTimestamp(4));
+			event.setFree(resultSet.getBoolean(5));
+			event.setEntrance_id(resultSet.getInt(6));
+			event.setAvailable_for_purchase(resultSet.getBoolean(7));
+			event.setNetsale_from(resultSet.getTimestamp(8));
+			event.setNetsale_to(resultSet.getTimestamp(9));
+			event.setPublish_time(resultSet.getTimestamp(10));
+			event.setPlace(resultSet.getString(11));
+			event.setCanceled(resultSet.getBoolean(12));
+			event.setEvent_id(resultSet.getInt(13));
+			event.setBillig_id(resultSet.getInt(14));
+			event.setBillig_name(resultSet.getString(15));
+			event.setTitle(resultSet.getString(16));
+			event.setLead(resultSet.getString(17));
+			event.setText(resultSet.getString(18));
+			event.setEvent_type(resultSet.getString(19));
+			event.setAge_limit(resultSet.getInt(20));
+			event.setSpotify_string(resultSet.getString(21));
 			
-		connection1.close();
-		connection2.close();
+			DBEvent jsonShowing = getShowingFromJson(event.getShowingId(), fetcher);
+			DBEvent jsonEvent = getEventFromJson(event.getEvent_id(), fetcher);
+			event = joinDbEvent(event, jsonShowing, jsonEvent);
+			
+			eventList.add(event);
+		}
+		return eventList.toArray(new DBEvent[eventList.size()]);
+	}
+	
+	/**
+	 * Get array of all events from JSON.
+	 * 
+	 * @return
+	 * @throws MalformedURLException
+	 * @throws IllegalArgumentException
+	 * @throws IOException
+	 */
+	private DBEvent[] populateEventsFromJson(JSONFetcher fetcher) throws MalformedURLException, IOException {
+		// Workaround - need to fetch a webpage before fetching JSON feed from uka.no
+		// TODO: sort this out if possible
+		fetcher.getWebFile("http://www.uka.no");
+		// Get all showings from JSON
+		String allShowingsString = cleanJsonString(fetcher.getWebFile(showingJSONURL));
+		if(allShowingsString == null || allShowingsString.length() < 6) {
+			return null;
+		}
+		List<DBEvent> eventList = new ArrayList<DBEvent>();
+		// Split into separate JSON objects
+		String[] showingStrings = allShowingsString.split(JSON_OBJECT_SEPARATOR_REGEX);
+		System.out.println("Found " + showingStrings.length + " JSON event objects");
+		for(String showingString : showingStrings) {
+			// Map JSON object
+			JSONShowing jsonShowingObject = new Gson().fromJson(showingString, JSONShowing.class);
+			// Create event object from JSON object
+			DBEvent showing = jsonToShowing(jsonShowingObject);
+			// Get event info from JSON
+			DBEvent event = getEventFromJson(showing.getEvent_id(), fetcher);
+			// Augment event info
+			showing = joinJsonEvent(showing, event);
+			eventList.add(showing);
+		}
+		return eventList.toArray(new DBEvent[eventList.size()]);
+	}
+	
+	/**
+	 * Get showing info with given id from JSON.
+	 * 
+	 * @param id
+	 * @param fetcher
+	 * @return
+	 * @throws MalformedURLException
+	 * @throws IllegalArgumentException
+	 * @throws IOException
+	 */
+	private DBEvent getShowingFromJson(int id, JSONFetcher fetcher) throws MalformedURLException, IllegalArgumentException, IOException {
+		// Get object from JSON
+		String showing = cleanJsonString(fetcher.getWebFile(showingJSONURL+id));
+		if(showing == null || showing.length() < 6) {
+			return null;
+		}
+		// Map JSON object
+		JSONShowing jsonObject = new Gson().fromJson(showing, JSONShowing.class);
+		// Create event object from JSON object
+		return jsonToShowing(jsonObject);
+	}
+	
+	/**
+	 * Get event info with given id from JSON.
+	 * 
+	 * @param id
+	 * @param fetcher
+	 * @return
+	 * @throws MalformedURLException
+	 * @throws IllegalArgumentException
+	 * @throws IOException
+	 */
+	private DBEvent getEventFromJson(int id, JSONFetcher fetcher) throws MalformedURLException, IllegalArgumentException, IOException {
+		// Get object from JSON
+		String event = cleanJsonString(fetcher.getWebFile(eventsJSONURL+id));
+		if(event == null || event.length() < 6) {
+			return null;
+		}
+		// Map JSON object
+		JSONEvent jsonObject = new Gson().fromJson(event, JSONEvent.class);
+		// Create event object from JSON object
+		return jsonToEvent(jsonObject);
+	}
+	
+	/**
+	 * Join JSON showing event object info with event object info.
+	 * 
+	 * @param primary Object containing showing info
+	 * @param secondary Object containing event info
+	 * @return Showing object augmented with event info.
+	 */
+	private DBEvent joinJsonEvent(DBEvent primary, DBEvent secondary) {
+		if(secondary != null) {
+			primary.setTitle(secondary.getTitle());
+			primary.setLead(secondary.getLead());
+			primary.setText(secondary.getText());
+			primary.setEvent_type(secondary.getEvent_type());
+			primary.setAge_limit(secondary.getAge_limit());
+			primary.setSpotify_string(secondary.getSpotify_string());
+			primary.setImageURL(secondary.getImageURL());
+			primary.setThumbnailURL(secondary.getThumbnailURL());
+		}
+		return primary;
+	}
+	
+	/**
+	 * Join DB showing event object info with event object info.
+	 * 
+	 * @param primary Object containing showing info
+	 * @param secondary Object containing event info
+	 * @return Showing object augmented with event info.
+	 */
+	private DBEvent joinDbEvent(DBEvent primary, DBEvent showing, DBEvent event) {
+		if(showing != null) {
+			primary.setLowest_price(showing.getLowest_price());
+			primary.setPlaceString(showing.getPlace_string());
+		}
+		if(event != null) {
+			primary.setImageURL(event.getImageURL());
+			primary.setThumbnailURL(event.getThumbnailURL());
+		}
+		return primary;
+	}
+	
+	/**
+	 * Clean JSON string to valid format.
+	 * 
+	 * @param jsonObject
+	 * @return
+	 */
+	private String cleanJsonString(String jsonObject) {
+		if(jsonObject == null) {
+			return null;
+		}
+		return jsonObject.substring(jsonObject.indexOf("[")+1, jsonObject.lastIndexOf("]")).trim();
+	}
+	
+	/**
+	 * Use date from JSON to create event object.
+	 * 
+	 * @param jsonShowing JSON object
+	 * @return Event object
+	 */
+	private DBEvent jsonToShowing(JSONShowing jsonShowing) {
+		if(jsonShowing == null) {
+			return null;
+		}
+		DBEvent event = new DBEvent();
+		event.setShowingId(jsonShowing.getId());
+		event.setShowing_time(Timestamp.valueOf(jsonShowing.getShowing_time().replace("T", " ")));
+		event.setSale_from(Timestamp.valueOf(jsonShowing.getSale_from().replace("T", " "))); 
+		event.setFree(jsonShowing.isFree());
+		event.setPlace(jsonShowing.getPlace());
+		event.setCanceled(jsonShowing.isCanceled());
+		event.setEvent_id(jsonShowing.getEvent_id());
+		event.setLowest_price(jsonShowing.getPrices_from());
+		event.setPlaceString(jsonShowing.getPlace_string());
+		return event;
+	}
+	
+	/**
+	 * Use date from JSON to create event object.
+	 * 
+	 * @param jsonEvent JSON object
+	 * @return Event object
+	 */
+	private DBEvent jsonToEvent(JSONEvent jsonEvent) {
+		if(jsonEvent == null) {
+			return null;
+		}
+		DBEvent event = new DBEvent();
+		event.setTitle(jsonEvent.getTitle());
+		event.setLead(jsonEvent.getLead());
+		event.setText("");	// TODO Use when available in JSON
+		event.setEvent_type(jsonEvent.getEvent_type());
+		event.setAge_limit(jsonEvent.getAge_limit());
+		event.setSpotify_string(jsonEvent.getSpotify_query());
+		event.setImageURL(jsonEvent.getImage_url());
+		// Thumbnail is not provided in JSON feed at this time
+		event.setThumbnailURL("");
+		return event;
+	}
+	
+	/**
+	 * Insert event data into DB.
+	 * 
+	 * @param event
+	 * @throws SQLException
+	 */
+	private void insertEventData(DBEvent event, Connection connection) throws SQLException {
+		// Insert data from Event bean into slave database using UPDATE INTO				
+		String SQL = "INSERT INTO findmydb.UKA_EVENTS (id,showing_time,publish_time,place,billig_id,billig_name,netsale_from,netsale_to,sale_from,sale_to,free,available_for_purchase,canceled,entrance_id,event_id,title,lead,text,event_type,image,thumbnail,age_limit,spotify_string,update_date,lowest_price,place_string) VALUES ("+event.getShowingId()+", '"+event.getShowing_time()+"', '"+event.getPublish_time()+"', '"+event.getPlace()+"' , "+event.getBillig_id()+" ,' "+event.getBillig_name()+"', '"+event.getNetsale_from()+"','"+event.getNetsale_to()+"','"+event.getSale_from()+"','"+event.getSale_to()+"',"+event.isFree()+","+event.isAvailable_for_purchase()+","+event.isCanceled()+","+event.getEntrance_id()+","+event.getEvent_id()+",'"+event.getTitle()+"','"+event.getLead()+"','"+event.getText()+"','"+event.getEvent_type()+"','"+event.getImageURL()+"','"+event.getThumbnailURL()+"',"+event.getAge_limit()+",'"+event.getSpotify_string()+"','"+timestamp+"', "+event.getLowest_price()+",'"+event.getPlace_string()+"') ON DUPLICATE KEY UPDATE showing_time='"+event.getShowing_time()+"',publish_time='"+event.getPublish_time()+"',place='"+event.getPlace()+"',billig_id="+event.getBillig_id()+", billig_name='"+event.getBillig_name()+"', netsale_from='"+event.getNetsale_from()+"', netsale_to='"+event.getNetsale_to()+"',sale_from='"+event.getSale_from()+"',sale_to='"+event.getSale_to()+"', free="+event.isFree()+", available_for_purchase="+event.isAvailable_for_purchase()+", canceled="+event.isCanceled()+", entrance_id="+event.getEntrance_id()+", event_id="+event.getEvent_id()+",title='"+event.getTitle()+"', lead='"+event.getLead()+"', text='"+event.getText()+"', event_type='"+event.getEvent_type()+"', image='"+event.getImageURL()+"',thumbnail='"+event.getThumbnailURL()+"', age_limit="+event.getAge_limit()+", spotify_string='"+event.getSpotify_string()+"', update_date='"+timestamp+"', lowest_price="+event.getLowest_price()+", place_string='"+event.getPlace_string()+"'" ;
+		if(!debugmode){
+			System.out.println("\n-> Insering new items into slave database");
+			Statement stmt = connection.createStatement();
+			stmt.executeUpdate(SQL);
+		}
+		else{
+			System.out.println("-->SQL:\n"+SQL);
+		}
+	}
+	
+	/**
+	 * Remove old event data from DB.
+	 * 
+	 * @param connection
+	 * @throws SQLException
+	 */
+	private void deleteOldEntries(Connection connection) throws SQLException {
+		String SQL = "DELETE FROM findmydb.UKA_EVENTS WHERE update_date < '" + timestamp+"'";
+		if(!debugmode){
+			Statement stmt = connection.createStatement();
+			System.out.println("\n-> Delete old items from slave database");
+			int result = stmt.executeUpdate(SQL);
+			System.out.println("-> Deleted "+result+" items");
+		}
+		else{
+			System.out.println("-->SQL:\n"+SQL);
+		}
 	}
 	
 	/**
@@ -135,7 +437,86 @@ public class DBReplicator {
 			e.printStackTrace();
 			return 501;
 		}
-		
+
+		// Populate Event bean to hold info
+		if(useProxy){
+			fetcher = new JSONFetcher(proxyHost, proxyPort);
+		}
+		else{
+			fetcher = new JSONFetcher();
+		}
+			
+		DBEvent[] events = null;
+		if(useDB) {
+			try {
+				System.out.println("-> Connecting to master database");
+				this.connectToMasterDataSource();
+			} catch (InstantiationException e) {
+				System.out.println("Unable to load PSQL driver for master database");
+				e.printStackTrace();
+				return 202;
+			} catch (IllegalAccessException e) {
+				System.out.println("Unable to load PSQL driver for master database");
+				e.printStackTrace();
+				return 203;
+			} catch (ClassNotFoundException e) {
+				System.out.println("Unable to load PSQL driver for master database");
+				e.printStackTrace();
+				return 204;
+			} catch (SQLException e) {
+				System.out.println("Unable to connect to master database");
+				e.printStackTrace();
+				return 201;
+			}
+			if (connectionMaster == null) {
+					System.out.println("No connection to master database, exiting");
+			    return 206;
+			}
+				try {
+					events = populateEventsFromDb(connectionMaster);
+				} catch (MalformedURLException e) {
+					System.out.println("Error connecting to URL");
+						e.printStackTrace();
+					return 303;
+				} catch (IllegalArgumentException e) {
+					System.out.println("Error reading from JSON feed");
+					e.printStackTrace();
+					return 302;
+				} catch (InstantiationException e) {
+					System.out.println("Unable to load PSQL driver for master database");
+					e.printStackTrace();
+					return 202;
+				} catch (IllegalAccessException e) {
+					System.out.println("Unable to execute SQL query on master database");
+					e.printStackTrace();
+					return 301;
+				} catch (ClassNotFoundException e) {
+					System.out.println("Unable to execute SQL query on master database");
+					e.printStackTrace();
+					return 301;
+				} catch (SQLException e) {
+					System.out.println("Unable to execute SQL query on master database");
+					e.printStackTrace();
+					return 301;
+				} catch (IOException e) {
+					System.out.println("Error reading from JSON feed");
+					e.printStackTrace();
+					return 302;
+				}
+		} else {
+			try {
+				events = populateEventsFromJson(fetcher);
+			} catch (MalformedURLException e) {
+				System.out.println("Error connecting to URL");
+				e.printStackTrace();
+				return 303;
+			} catch (IOException e) {
+				System.out.println("Error reading from JSON feed");
+				e.printStackTrace();
+				return 302;
+			}
+		}
+			
 		try{
 			System.out.println("-> Connecting to slave database");
 			this.connectToSlaveDataSource();
@@ -157,234 +538,38 @@ public class DBReplicator {
 			return 104;
 		}
 		
-		
-		// Set up connection to master database
-		try{
-			System.out.println("-> Connecting to master database");
-			this.connectToMasterDataSource();
+		if(connectionSlave == null) {
+			System.out.println("No connection to slave database, exiting");
+			return 106;
 		}
-		catch(SQLException e){
-			System.out.println("Unable to connect to master database");
-			e.printStackTrace();
-			return 201;
-		} catch (InstantiationException e) {
-			System.out.println("Unable to load PSQL driver for master database");
-			e.printStackTrace();
-			return 202;
-		} catch (IllegalAccessException e) {
-			System.out.println("Unable to load PSQL driver for master database");
-			e.printStackTrace();
-			return 203;
-		} catch (ClassNotFoundException e) {
-			System.out.println("Unable to load PSQL driver for master database");
-			e.printStackTrace();
-			return 204;
+		if(events != null) {
+			for(DBEvent event : events) {
+				try {
+					insertEventData(event, connectionSlave);
+				} catch (SQLException e) {
+					System.out.println("Unable to execute SQL update query on slave database");
+					e.printStackTrace();
+					return 105;
+				}
+			}
+		} else {
+			System.out.println("-> No new events found!");
 		}
 		
-		// Get all events from UKA master database view
-		// View is uka.events_showing_event_published
-		if (connection2 != null){
-		    try{
-		    	System.out.println("-> Retrieving data from master database");
-		    	Statement stmt = connection2.createStatement();
-		    	rs2 = stmt.executeQuery("SELECT * FROM uka.events_showing_event_published");
-
-		    }
-		    catch(java.sql.SQLException e){
-		    	System.out.println("Unable to execute SQL query on master database");
-		    	e.printStackTrace();
-		    	return 205;
-		    }
-		    finally{
-		    }
-		}
-		else{
-			System.out.println("No connection to master database, exiting");
-		    return 206;
-		}		
-
-		// Populate Event bean to hold info
-		try{
-			if(useACNProxy){
-				fetcher = new JSONFetcher("oscpx1118.accenture.com","3128");
-			}
-			else{
-				fetcher = new JSONFetcher();
-			}
-			
-			// Workaround - need to fetch a webpage before fetching JSON feed from uka.no
-			// TODO: sort this out if possible
-			fetcher.getWebFile("http://www.uka.no");
-			
-			int counter = 0;
-			
-			System.out.println("Inserting row:\n");
-			while(rs2.next()){				
-				event = new DBEvent();
-				
-				System.out.print(++counter + ",");
-				
-				
-				boolean useDB = false;// Using JSON instead of DB
-				if(useDB) {
-					// This must match database view
-					event.setShowingId(rs2.getInt(1));
-					event.setShowing_time(rs2.getTimestamp(2));
-					event.setSale_from(rs2.getTimestamp(3)); 
-					event.setSale_to(rs2.getTimestamp(4));
-					event.setFree(rs2.getBoolean(5));
-					event.setEntrance_id(rs2.getInt(6));
-					event.setAvailable_for_purchase(rs2.getBoolean(7));
-					event.setNetsale_from(rs2.getTimestamp(8));
-					event.setNetsale_to(rs2.getTimestamp(9));
-					event.setPublish_time(rs2.getTimestamp(10));
-					event.setPlace(rs2.getString(11));
-					event.setCanceled(rs2.getBoolean(12));
-					event.setEvent_id(rs2.getInt(13));
-					event.setBillig_id(rs2.getInt(14));
-					event.setBillig_name(rs2.getString(15));
-					event.setTitle(rs2.getString(16));
-					event.setLead(rs2.getString(17));
-					event.setText(rs2.getString(18));
-					event.setEvent_type(rs2.getString(19));
-					event.setAge_limit(rs2.getInt(20));
-					event.setSpotify_string(rs2.getString(21));
-				}
-				
-				/* JSON to Java using Google GSON
-				 * ref: http://stackoverflow.com/questions/1688099/converting-json-to-java/1688182#1688182
-				 */
-				String eventJSONcontent = fetcher.getWebFile(eventsJSONURL+event.getEvent_id());
-				String croppedEventJSONcontent = "";
-				if(eventJSONcontent.length() > 5){
-					croppedEventJSONcontent = eventJSONcontent.substring(eventJSONcontent.indexOf("[")+1, eventJSONcontent.lastIndexOf("]")).trim();
-				} else {
-					return 302;
-				}
-					
-				JSONEvent eventDataArray = new Gson().fromJson(croppedEventJSONcontent, JSONEvent.class);
-				
-				if(debugmode){
-					System.out.println("eventDataArray:\n"+eventDataArray);
-				}
-				
-				String showingJSONcontent = fetcher.getWebFile(showingJSONURL+event.getShowingId());
-				String croppedShowingJSONcontent = "";
-				if(showingJSONcontent.length() > 5){
-					croppedShowingJSONcontent = showingJSONcontent.substring(showingJSONcontent.indexOf("[")+1, showingJSONcontent.lastIndexOf("]")).trim();
-				} else {
-					return 302;
-				}
-				
-				JSONShowing showingDataArray = new Gson().fromJson(croppedShowingJSONcontent, JSONShowing.class);
-				
-				if(debugmode){
-					System.out.println("showingDataArray:\n"+showingDataArray);
-					System.out.println("eventDataArray:\n"+eventDataArray);
-				}
-				
-				// Add additional fields based on JSON feed
-				// Thumbnail is not provided in JSON feed at this time
-				event.setThumbnailURL("");
-				
-				if(showingDataArray != null) {
-					if(!useDB) {
-						event.setShowingId(showingDataArray.getId());
-						event.setShowing_time(Timestamp.valueOf(showingDataArray.getShowing_time()));
-						event.setSale_from(Timestamp.valueOf(showingDataArray.getSale_from())); 
-						//event.setSale_to(rs2.getTimestamp(4));
-						event.setFree(showingDataArray.isFree());
-						//event.setEntrance_id(rs2.getInt(6));
-						//event.setAvailable_for_purchase(rs2.getBoolean(7));
-						//event.setNetsale_from(rs2.getTimestamp(8));
-						//event.setNetsale_to(rs2.getTimestamp(9));
-						//event.setPublish_time(rs2.getTimestamp(10));
-						event.setPlace(showingDataArray.getPlace());
-						event.setCanceled(showingDataArray.isCanceled());
-						event.setEvent_id(showingDataArray.getEvent_id());
-						//event.setBillig_id(rs2.getInt(14));
-						//event.setBillig_name(rs2.getString(15));
-					}
-					event.setLowest_price(showingDataArray.getPrices_from());
-					event.setPlaceString(showingDataArray.getPlace_string());
-				}
-				if(eventDataArray != null){
-					
-					if(!useDB) {
-						event.setTitle(eventDataArray.getTitle());
-						event.setLead(eventDataArray.getLead());
-						event.setText("");	// TODO Use when available in JSON
-						event.setEvent_type(eventDataArray.getEvent_type());
-						event.setAge_limit(eventDataArray.getAge_limit());
-						event.setSpotify_string(eventDataArray.getSpotify_query());
-					}
-					event.setImageURL(eventDataArray.getImage_url());
-				}
-				
-				// Insert data from Event bean into slave database using UPDATE INTO				
-				if(connection1 != null){
-					try{
-						String SQL = "INSERT INTO findmydb.UKA_EVENTS (id,showing_time,publish_time,place,billig_id,billig_name,netsale_from,netsale_to,sale_from,sale_to,free,available_for_purchase,canceled,entrance_id,event_id,title,lead,text,event_type,image,thumbnail,age_limit,spotify_string,update_date,lowest_price,place_string) VALUES ("+event.getShowingId()+", '"+event.getShowing_time()+"', '"+event.getPublish_time()+"', '"+event.getPlace()+"' , "+event.getBillig_id()+" ,' "+event.getBillig_name()+"', '"+event.getNetsale_from()+"','"+event.getNetsale_to()+"','"+event.getSale_from()+"','"+event.getSale_to()+"',"+event.isFree()+","+event.isAvailable_for_purchase()+","+event.isCanceled()+","+event.getEntrance_id()+","+event.getEvent_id()+",'"+event.getTitle()+"','"+event.getLead()+"','"+event.getText()+"','"+event.getEvent_type()+"','"+event.getImageURL()+"','"+event.getThumbnailURL()+"',"+event.getAge_limit()+",'"+event.getSpotify_string()+"','"+timestamp+"', "+event.getLowest_price()+",'"+event.getPlace_string()+"') ON DUPLICATE KEY UPDATE showing_time='"+event.getShowing_time()+"',publish_time='"+event.getPublish_time()+"',place='"+event.getPlace()+"',billig_id="+event.getBillig_id()+", billig_name='"+event.getBillig_name()+"', netsale_from='"+event.getNetsale_from()+"', netsale_to='"+event.getNetsale_to()+"',sale_from='"+event.getSale_from()+"',sale_to='"+event.getSale_to()+"', free="+event.isFree()+", available_for_purchase="+event.isAvailable_for_purchase()+", canceled="+event.isCanceled()+", entrance_id="+event.getEntrance_id()+", event_id="+event.getEvent_id()+",title='"+event.getTitle()+"', lead='"+event.getLead()+"', text='"+event.getText()+"', event_type='"+event.getEvent_type()+"', image='"+event.getImageURL()+"',thumbnail='"+event.getThumbnailURL()+"', age_limit="+event.getAge_limit()+", spotify_string='"+event.getSpotify_string()+"', update_date='"+timestamp+"', lowest_price="+event.getLowest_price()+", place_string='"+event.getPlace_string()+"'" ;
-						if(!debugmode){
-							Statement stmt = connection1.createStatement();
-							stmt.executeUpdate(SQL);
-						}
-						else{
-							System.out.println("-->SQL:\n"+SQL);
-						}
-					}
-					catch(Exception e){
-						System.out.println("Unable to execute SQL update query on slave database");
-						e.printStackTrace();
-						return 105;
-					}
-				}
-				else{
-					System.out.println("No connection to slave database, exiting");
-					return 106;
-				}					
-			}
-			
-		}
-		catch(SQLException e){
-			System.out.println("Error reading from ResultSet");
-			e.printStackTrace();
-			
-			//Make sure no delete is executed if data has not been fetched correctly 
-			doDelete = false;
-			
-			return 301;
-		}
-		catch(IOException e){
-			System.out.println("Error reading from JSON feed");
-			e.printStackTrace();
-			return 302; 
-		}
 		
 		// Remove all rows that are older than current timestamp in slave database
-		if(doDelete){
-			if(connection1 != null){
-				try{
-					String SQL = "DELETE FROM findmydb.UKA_EVENTS WHERE update_date < '" + timestamp+"'";
-					if(!debugmode){
-						Statement stmt = connection1.createStatement();
-						System.out.println("\n-> Delete old items from slave database");
-						int result = stmt.executeUpdate(SQL);
-						System.out.println("-> Deleted "+result+" items");
-					}
-					else{
-						System.out.println("-->SQL:\n"+SQL);
-					}
-				}
-				catch(SQLException e){
-					System.out.println("Unable to execute DELETE FROM statement on slave database");
-					e.printStackTrace();
-					return 401;
-				}
-			}
-			else{
+		if(doDelete) {
+			if(connectionSlave == null) {
 				System.out.println("No connection to slave database for delete operation, exiting");
 				return 402;
+			}
+			try{
+				deleteOldEntries(connectionSlave);
+			}
+			catch(SQLException e){
+				System.out.println("Unable to execute DELETE FROM statement on slave database");
+				e.printStackTrace();
+				return 401;
 			}
 		}
 		// Close result sets and DB connections
