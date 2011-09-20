@@ -214,8 +214,9 @@ public class DBReplicator {
 	 * @throws MalformedURLException
 	 * @throws IllegalArgumentException
 	 * @throws IOException
+	 * @throws InterruptedException 
 	 */
-	private DBEvent[] populateEventsFromJson(JSONFetcher fetcher) throws MalformedURLException, IOException {
+	private DBEvent[] populateEventsFromJson(JSONFetcher fetcher) throws MalformedURLException, IOException, InterruptedException {
 		// Workaround - need to fetch a webpage before fetching JSON feed from uka.no
 		// TODO: sort this out if possible
 		fetcher.getWebFile("http://www.uka.no");
@@ -239,6 +240,9 @@ public class DBReplicator {
 			// Augment event info
 			showing = joinJsonEvent(showing, event);
 			eventList.add(showing);
+			// Sleep for 1 second to not spam webserver
+			System.out.println("Waiting 1 second...");
+			Thread.sleep(1000);
 		}
 		return eventList.toArray(new DBEvent[eventList.size()]);
 	}
@@ -277,6 +281,7 @@ public class DBReplicator {
 	 */
 	private DBEvent getEventFromJson(int id, JSONFetcher fetcher) throws MalformedURLException, IllegalArgumentException, IOException {
 		// Get object from JSON
+		System.out.println("Getting JSON event id=" + id);
 		String event = cleanJsonString(fetcher.getWebFile(eventsJSONURL+id));
 		if(event == null || event.length() < 6) {
 			return null;
@@ -527,6 +532,10 @@ public class DBReplicator {
 				return 303;
 			} catch (IOException e) {
 				System.out.println("Error reading from JSON feed");
+				e.printStackTrace();
+				return 302;
+			} catch (InterruptedException e) {
+				System.out.println("Error reading from JSON feed. Thread died!");
 				e.printStackTrace();
 				return 302;
 			}
