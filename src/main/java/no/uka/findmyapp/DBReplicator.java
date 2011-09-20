@@ -231,6 +231,7 @@ public class DBReplicator {
 		for(String showingString : showingStrings) {
 			// Map JSON object
 			JSONShowing jsonShowingObject = new Gson().fromJson(showingString, JSONShowing.class);
+			//System.out.println("BEBUG: Showing object: " + jsonShowingObject);
 			// Create event object from JSON object
 			DBEvent showing = jsonToShowing(jsonShowingObject);
 			// Get event info from JSON
@@ -351,8 +352,8 @@ public class DBReplicator {
 		}
 		DBEvent event = new DBEvent();
 		event.setShowingId(jsonShowing.getId());
-		event.setShowing_time(Timestamp.valueOf(jsonShowing.getShowing_time().replace("T", " ")));
-		event.setSale_from(Timestamp.valueOf(jsonShowing.getSale_from().replace("T", " "))); 
+		event.setShowing_time(getTimestamp(jsonShowing.getShowing_time()));
+		event.setSale_from(getTimestamp(jsonShowing.getSale_from()));
 		event.setFree(jsonShowing.isFree());
 		event.setPlace(jsonShowing.getPlace());
 		event.setCanceled(jsonShowing.isCanceled());
@@ -360,6 +361,20 @@ public class DBReplicator {
 		event.setLowest_price(jsonShowing.getPrices_from());
 		event.setPlaceString(jsonShowing.getPlace_string());
 		return event;
+	}
+	
+	/**
+	 * Convert timestamp string to SQL timestamp.
+	 * 
+	 * @param timestamp
+	 * @return
+	 */
+	private Timestamp getTimestamp(String timestamp) {
+		if(timestamp == null) {
+			return null;
+		} else {
+			return Timestamp.valueOf(timestamp.replace("T", " "));
+		}
 	}
 	
 	/**
@@ -728,7 +743,7 @@ class JSONShowing {
 		
 		@Override
 		public String toString(){
-			return String.format("canceled:%s, place:%s, buy_url:%s,entrance_ticket:%s,showing_time:%s,event_id:%d,prices_from:%d,id:%d,free:%s,sales_from:%s", this.isCanceled(), this.place, this.buy_url, this.entrance_ticket, this.showing_time, this.event_id, this.prices_from, this.id, this.free, this.sale_from );
+			return String.format("canceled:%s, place:%s, buy_url:%s,entrance_ticket:%s,showing_time:%s,event_id:%d,prices_from:%d,id:%d,free:%s,sale_from:%s", this.isCanceled(), this.place, this.buy_url, this.entrance_ticket, this.showing_time, this.event_id, this.prices_from, this.id, this.free, this.sale_from );
 		}
 		
 }
